@@ -1,160 +1,305 @@
+import 'dart:async';
+import 'dart:io';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:aplikasi_form_data_diri_siswa/pages/siswa_detail.dart';
+import 'package:aplikasi_form_data_diri_siswa/pages/siswa_edit.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/supabase_service.dart';
 import 'siswa_form.dart';
 
-class SiswaListPage extends StatefulWidget {
-  const SiswaListPage({super.key});
+class HomePage extends StatefulWidget {
+  const HomePage({super.key});
 
   @override
-  State<SiswaListPage> createState() => _SiswaListPageState();
+  State<HomePage> createState() => _HomePageState();
 }
 
-class _SiswaListPageState extends State<SiswaListPage> {
+class _HomePageState extends State<HomePage> {
   final SupabaseService _service = SupabaseService();
   List<Map<String, dynamic>> siswa = [];
   bool _isLoading = false;
+  bool _isDeleting = false;
+  StreamSubscription<ConnectivityResult>? _connectionSubscription;
+  bool _isDialogShowing = false;
 
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _checkInitialConnectionAndLoadData();
+
+    _connectionSubscription = Connectivity().onConnectivityChanged
+        .map(
+          (event) => event.isNotEmpty ? event.first : ConnectivityResult.none,
+        )
+        .listen((result) {
+          if (result == ConnectivityResult.none) {
+            _showNoConnectionDialog();
+          } else if (result == ConnectivityResult.wifi ||
+              result == ConnectivityResult.mobile) {
+            if (!_isLoading && mounted) {
+              _loadData(showSuccessMessage: true);
+            }
+          }
+        });
   }
 
-  Future<void> _loadData() async {
-    setState(() => _isLoading = true);
-    try {
-      final data = await _service.getSiswa();
-      setState(() {
-        siswa = data;
-      });
-    } catch (e) {
-      debugPrint("Error load data: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Gagal memuat data siswa")),
-      );
-    } finally {
-      setState(() => _isLoading = false);
+  @override
+  void dispose() {
+    _connectionSubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _checkInitialConnectionAndLoadData() async {
+    final connectivityResult = await Connectivity().checkConnectivity();
+    if (connectivityResult == ConnectivityResult.none) {
+      await _showNoConnectionDialog();
+    } else {
+      await _loadData();
     }
   }
 
-  Future<void> _delete(dynamic id) async {
-    try {
-      await _service.deleteSiswa(id);
-      _loadData();
-    } catch (e) {
-      debugPrint("Error delete: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Gagal menghapus data siswa")),
-      );
-    }
-  }
+  Future<void> _showNoConnectionDialog() async {
+    if (!mounted || _isDialogShowing) return;
+    setState(() => _isDialogShowing = true);
 
-  void _showSiswaDetails(BuildContext context, Map<String, dynamic> item) {
-    showDialog(
+    await showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        backgroundColor: Colors.white,
-        title: Text(
-          item['nama_lengkap'] ?? "-",
-          style: GoogleFonts.roboto(
-            fontWeight: FontWeight.bold,
-            fontSize: 22,
-            color: Colors.blueAccent.shade700,
-          ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            const Icon(Icons.wifi_off, color: Colors.redAccent),
+            const SizedBox(width: 8),
+            Text(
+              "Tidak Ada Koneksi",
+              style: GoogleFonts.roboto(
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+              ),
+            ),
+          ],
         ),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildDetailRow("NISN", item['nisn']),
-              _buildDetailRow("Jenis Kelamin", item['jenis_kelamin']),
-              _buildDetailRow("Agama", item['agama']),
-              _buildDetailRow("Tempat, Tanggal Lahir", item['tempat_tanggal_lahir']),
-              _buildDetailRow("No. Telp/HP", item['no_telp']),
-              _buildDetailRow("NIK", item['nik']),
-              const Divider(color: Colors.grey),
-              Text(
-                "Alamat",
-                style: GoogleFonts.roboto(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                  color: Colors.blueAccent.shade700,
-                ),
-              ),
-              const SizedBox(height: 8),
-              _buildDetailRow("Jalan", item['alamat_jalan']),
-              _buildDetailRow("RT/RW", item['alamat_rt_rw']),
-              _buildDetailRow("Dusun", item['alamat_dusun']),
-              _buildDetailRow("Desa", item['alamat_desa']),
-              _buildDetailRow("Kecamatan", item['alamat_kecamatan']),
-              _buildDetailRow("Kabupaten", item['alamat_kabupaten']),
-              _buildDetailRow("Provinsi", item['alamat_provinsi']),
-              _buildDetailRow("Kode Pos", item['alamat_kode_pos']),
-              const Divider(color: Colors.grey),
-              Text(
-                "Orang Tua / Wali",
-                style: GoogleFonts.roboto(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                  color: Colors.blueAccent.shade700,
-                ),
-              ),
-              const SizedBox(height: 8),
-              _buildDetailRow("Nama Ayah", item['nama_ayah']),
-              _buildDetailRow("Nama Ibu", item['nama_ibu']),
-              _buildDetailRow("Nama Wali", item['nama_wali']),
-              _buildDetailRow("Alamat Wali", item['alamat_wali']),
-            ],
-          ),
+        content: Text(
+          "Periksa koneksi internet Anda dan coba lagi.",
+          style: GoogleFonts.roboto(fontSize: 14),
         ),
         actions: [
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              final connectivityResult = await Connectivity()
+                  .checkConnectivity();
+              if (connectivityResult != ConnectivityResult.none) {
+                await _loadData(showSuccessMessage: true);
+              } else {
+                await _showNoConnectionDialog();
+              }
+            },
+            child: Text(
+              "Coba Lagi",
+              style: GoogleFonts.roboto(
+                color: Colors.blueAccent,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: Text(
               "Tutup",
-              style: GoogleFonts.roboto(
-                color: Colors.blueAccent.shade700,
-                fontWeight: FontWeight.w600,
-              ),
+              style: GoogleFonts.roboto(color: Colors.grey.shade700),
             ),
           ),
         ],
       ),
     );
+
+    if (mounted) {
+      setState(() => _isDialogShowing = false);
+    }
   }
 
-  Widget _buildDetailRow(String label, dynamic value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            flex: 2,
-            child: Text(
-              "$label:",
-              style: GoogleFonts.roboto(
-                fontWeight: FontWeight.w600,
-                fontSize: 14,
-                color: Colors.grey.shade700,
+  Future<void> _loadData({bool showSuccessMessage = false}) async {
+    if (_isLoading) return;
+    setState(() => _isLoading = true);
+
+    try {
+      final connectivityResult = await Connectivity().checkConnectivity();
+      if (connectivityResult == ConnectivityResult.none) {
+        await _showNoConnectionDialog();
+        return;
+      }
+
+      final data = await _service.getSiswa(
+        fields: [
+          'id',
+          'nisn',
+          'nama',
+          'jenis_kelamin',
+          'agama',
+          'ttl',
+          'no_hp',
+          'nik',
+          'jalan',
+          'rt_rw',
+          'dusun',
+          'desa',
+          'kecamatan',
+          'kabupaten',
+          'provinsi',
+          'kode_pos',
+          'alamat_id',
+          'orang_tua_id',
+        ],
+      );
+
+      if (mounted) {
+        setState(() {
+          siswa = data;
+        });
+        if (showSuccessMessage && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text("Data berhasil dimuat ulang"),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 2),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
               ),
             ),
+          );
+        }
+      }
+    } on SocketException {
+      if (mounted) {
+        await _showNoConnectionDialog();
+      }
+    } catch (e) {
+      debugPrint("Error loading data: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              "Gagal memuat data. Periksa koneksi internet anda.",
+            ),
+            backgroundColor: Colors.redAccent,
+            duration: Duration(seconds: 4),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
           ),
-          Expanded(
-            flex: 3,
-            child: Text(
-              value?.toString() ?? "-",
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _delete(String id, String nama, String nisn) async {
+    if (_isDeleting) return;
+    setState(() => _isDeleting = true);
+
+    try {
+      final connectivityResult = await Connectivity().checkConnectivity();
+      if (connectivityResult == ConnectivityResult.none) {
+        await _showNoConnectionDialog();
+        return;
+      }
+
+      await _service.deleteSiswa(id);
+      await _loadData();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Siswa '$nama' (NISN: $nisn) berhasil dihapus"),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        );
+      }
+    } on SocketException {
+      if (mounted) {
+        await _showNoConnectionDialog();
+      }
+    } catch (e) {
+      debugPrint("Error deleting data: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Gagal menghapus siswa: ${e.toString()}"),
+            backgroundColor: Colors.redAccent,
+            duration: const Duration(seconds: 4),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isDeleting = false);
+      }
+    }
+  }
+
+  Future<void> _confirmDelete(String id, String nama, String nisn) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            const Icon(Icons.warning, color: Colors.redAccent),
+            const SizedBox(width: 8),
+            Text(
+              "Konfirmasi Hapus",
               style: GoogleFonts.roboto(
-                fontSize: 14,
-                color: Colors.black87,
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          "Apakah Anda yakin ingin menghapus data siswa '$nama' (NISN: $nisn)?",
+          style: GoogleFonts.roboto(fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(
+              "Batal",
+              style: GoogleFonts.roboto(color: Colors.grey.shade700),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(
+              "Hapus",
+              style: GoogleFonts.roboto(
+                color: Colors.redAccent,
+                fontWeight: FontWeight.bold,
               ),
             ),
           ),
         ],
       ),
     );
+
+    if (confirm == true) {
+      await _delete(id, nama, nisn);
+    }
   }
 
   @override
@@ -165,169 +310,120 @@ class _SiswaListPageState extends State<SiswaListPage> {
           "Data Siswa",
           style: GoogleFonts.roboto(
             fontWeight: FontWeight.bold,
-            fontSize: 24,
+            fontSize: 20,
             color: Colors.white,
           ),
         ),
         centerTitle: true,
+        iconTheme: const IconThemeData(color: Colors.white),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Colors.white),
+            onPressed: () => _loadData(showSuccessMessage: true),
+          ),
+        ],
         flexibleSpace: Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [Colors.blueAccent.shade700, Colors.blueAccent.shade200],
+              colors: [Colors.blue.shade700, Colors.blueAccent.shade200],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
           ),
         ),
-        elevation: 8,
-        shadowColor: Colors.blueAccent.withOpacity(0.4),
+        elevation: 6,
+        shadowColor: Colors.blueAccent.withValues(alpha: 0.4),
       ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Colors.grey.shade50, Colors.grey.shade200],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: _isLoading
-            ? const Center(
-                child: CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.blueAccent),
-                ),
-              )
-            : siswa.isEmpty
-                ? Center(
-                    child: Text(
-                      "Belum ada data siswa",
-                      style: GoogleFonts.roboto(
-                        fontSize: 18,
-                        color: Colors.grey.shade600,
-                        fontWeight: FontWeight.w500,
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : siswa.isEmpty
+          ? Center(
+              child: Text(
+                "Belum ada data siswa",
+                style: GoogleFonts.roboto(fontSize: 16),
+              ),
+            )
+          : ListView.builder(
+              itemCount: siswa.length,
+              itemBuilder: (context, index) {
+                final item = siswa[index];
+                return Card(
+                  margin: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 3,
+                  child: ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: Colors.blueAccent,
+                      child: Text(
+                        item['nama'][0],
+                        style: const TextStyle(color: Colors.white),
                       ),
                     ),
-                  )
-                : ListView.builder(
-                    itemCount: siswa.length,
-                    itemBuilder: (context, index) {
-                      final item = siswa[index];
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 16.0),
-                        child: Dismissible(
-                          key: ValueKey(item['id']),
-                          direction: DismissDirection.endToStart,
-                          background: Container(
-                            alignment: Alignment.centerRight,
-                            padding: const EdgeInsets.only(right: 20),
-                            decoration: BoxDecoration(
-                              color: Colors.redAccent,
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: const Icon(Icons.delete, color: Colors.white),
+                    title: Text(
+                      item['nama'],
+                      style: GoogleFonts.roboto(fontWeight: FontWeight.w600),
+                    ),
+                    subtitle: Text("NISN: ${item['nisn']}"),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(
+                            Icons.visibility,
+                            color: Colors.blueAccent,
                           ),
-                          confirmDismiss: (_) async {
-                            final confirm = await showDialog<bool>(
-                              context: context,
-                              builder: (context) => AlertDialog(
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                title: Text(
-                                  'Konfirmasi Hapus',
-                                  style: GoogleFonts.roboto(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                content: Text(
-                                  'Apakah Anda yakin ingin menghapus ${item['nama_lengkap'] ?? "-"}?',
-                                  style: GoogleFonts.roboto(),
-                                ),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () => Navigator.pop(context, false),
-                                    child: Text('Batal', style: GoogleFonts.roboto(color: Colors.grey.shade700)),
-                                  ),
-                                  TextButton(
-                                    onPressed: () => Navigator.pop(context, true),
-                                    child: Text('Hapus', style: GoogleFonts.roboto(color: Colors.redAccent)),
-                                  ),
-                                ],
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) =>
+                                    SiswaDetailPage(siswa: item),
                               ),
                             );
-                            return confirm ?? false;
                           },
-                          onDismissed: (_) => _delete(item['id']),
-                          child: Card(
-                            elevation: 8,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: ListTile(
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                              leading: CircleAvatar(
-                                radius: 28,
-                                backgroundColor: Colors.blueAccent.shade100,
-                                child: Text(
-                                  (item['nama_lengkap']?.toString()[0] ?? "?").toUpperCase(),
-                                  style: GoogleFonts.roboto(
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.blueAccent.shade700,
-                                  ),
-                                ),
-                              ),
-                              title: Text(
-                                item['nama_lengkap'] ?? "-",
-                                style: GoogleFonts.roboto(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.black87,
-                                ),
-                              ),
-                              subtitle: Padding(
-                                padding: const EdgeInsets.only(top: 6.0),
-                                child: Text(
-                                  "NISN: ${item['nisn'] ?? "-"}",
-                                  style: GoogleFonts.roboto(
-                                    fontSize: 14,
-                                    color: Colors.grey.shade600,
-                                  ),
-                                ),
-                              ),
-                              onTap: () => _showSiswaDetails(context, item),
-                              trailing: IconButton(
-                                icon: Icon(Icons.edit, color: Colors.blueAccent.shade700),
-                                onPressed: () async {
-                                  await Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) => SiswaFormPage(siswa: item),
-                                    ),
-                                  );
-                                  _loadData();
-                                },
-                                tooltip: 'Edit',
-                              ),
-                            ),
-                          ),
                         ),
-                      );
-                    },
+                        IconButton(
+                          icon: const Icon(Icons.edit, color: Colors.orange),
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) =>
+                                    SiswaEditPage(siswa: item),
+                              ),
+                            ).then((_) => _loadData());
+                          },
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete, color: Colors.red),
+                          onPressed: _isDeleting
+                              ? null
+                              : () => _confirmDelete(
+                                  item['id'].toString(),
+                                  item['nama'],
+                                  item['nisn'],
+                                ),
+                        ),
+                      ],
+                    ),
                   ),
-      ),
+                );
+              },
+            ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          await Navigator.push(
+        onPressed: () {
+          Navigator.push(
             context,
             MaterialPageRoute(builder: (context) => const SiswaFormPage()),
-          );
-          _loadData();
+          ).then((_) => _loadData());
         },
-        backgroundColor: Colors.blueAccent.shade700,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: const Icon(Icons.add, size: 28, color: Colors.white),
-        tooltip: 'Tambah Siswa',
+        backgroundColor: Colors.blueAccent,
+        child: const Icon(Icons.add, color: Colors.white),
       ),
     );
   }

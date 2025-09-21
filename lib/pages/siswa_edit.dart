@@ -2,23 +2,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-class SiswaFormPage extends StatefulWidget {
-  final Map<String, dynamic>? siswa;
-  const SiswaFormPage({super.key, this.siswa});
+class SiswaEditPage extends StatefulWidget {
+  final Map<String, dynamic> siswa; // Required for editing
+  const SiswaEditPage({super.key, required this.siswa});
 
   @override
-  State<SiswaFormPage> createState() => _SiswaFormPageState();
+  State<SiswaEditPage> createState() => _SiswaEditPageState();
 }
 
-class _SiswaFormPageState extends State<SiswaFormPage> {
+class _SiswaEditPageState extends State<SiswaEditPage> {
   final _formKey = GlobalKey<FormState>();
   final SupabaseClient _supabase = Supabase.instance.client;
 
   final Map<String, TextEditingController> _controllers = {};
   String? _jenisKelamin;
   String? _agama;
-  DateTime? _tanggalLahir;
-  final TextEditingController _tempatController = TextEditingController();
+  late final TextEditingController _tempatLahirController;
+  late final TextEditingController _tanggalLahirController;
   final TextEditingController _dusunSiswaController = TextEditingController();
   final TextEditingController _dusunWaliController = TextEditingController();
   String? _selectedDusunSiswa;
@@ -29,6 +29,7 @@ class _SiswaFormPageState extends State<SiswaFormPage> {
   bool _isLoadingWaliAddress = false;
   bool _hasDusunError = false;
   bool _isSaving = false;
+  String? _dateError; // To store date parsing error
 
   final List<String> _listJenisKelamin = ["Laki-laki", "Perempuan"];
   final List<String> _listAgama = [
@@ -74,39 +75,64 @@ class _SiswaFormPageState extends State<SiswaFormPage> {
       'kode_pos_wali',
     ];
     for (var f in fields) {
-      _controllers[f] = TextEditingController(text: widget.siswa?[f.replaceAll('_siswa', '').replaceAll('_wali', '')]?.toString() ?? '');
+      _controllers[f] = TextEditingController(text: widget.siswa[f.replaceAll('_siswa', '').replaceAll('_wali', '')]?.toString() ?? '');
+    }
+
+    // Initialize tempat and tanggal lahir controllers
+    String tempat = '';
+    String tanggal = '';
+    if (widget.siswa['ttl'] != null && widget.siswa['ttl'].toString().isNotEmpty) {
+      final ttlParts = widget.siswa['ttl'].toString().split(', ');
+      if (ttlParts.length >= 2) {
+        tempat = ttlParts[0].trim();
+        tanggal = ttlParts[1].trim();
+        // Validate date format
+        try {
+          DateTime.parse(tanggal);
+          _dateError = null;
+        } catch (e) {
+          debugPrint('Error parsing date: $e');
+          _dateError = 'Format tanggal lahir tidak valid: $tanggal';
+        }
+      } else {
+        tempat = widget.siswa['ttl'].toString().trim();
+        _dateError = 'Data tanggal lahir tidak lengkap';
+      }
+    } else {
+      _dateError = 'Data tempat dan tanggal lahir kosong';
+    }
+
+    _tempatLahirController = TextEditingController(text: tempat);
+    _tanggalLahirController = TextEditingController(text: tanggal);
+
+    // Show SnackBar for date error
+    if (_dateError != null && mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_dateError!),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      });
     }
   }
 
   void _initializeFormData() async {
-    _jenisKelamin = widget.siswa?['jenis_kelamin']?.toString();
-    _agama = widget.siswa?['agama']?.toString();
-    _selectedDusunSiswa = widget.siswa?['dusun']?.toString();
-    _dusunSiswaController.text = widget.siswa?['dusun']?.toString() ?? '';
+    _jenisKelamin = widget.siswa['jenis_kelamin']?.toString();
+    _agama = widget.siswa['agama']?.toString();
+    _selectedDusunSiswa = widget.siswa['dusun']?.toString();
+    _dusunSiswaController.text = widget.siswa['dusun']?.toString() ?? '';
 
-    _controllers['desa_siswa']?.text = widget.siswa?['desa']?.toString() ?? '';
-    _controllers['kecamatan_siswa']?.text = widget.siswa?['kecamatan']?.toString() ?? '';
-    _controllers['kabupaten_siswa']?.text = widget.siswa?['kabupaten']?.toString() ?? '';
-    _controllers['provinsi_siswa']?.text = widget.siswa?['provinsi']?.toString() ?? '';
-    _controllers['kode_pos_siswa']?.text = widget.siswa?['kode_pos']?.toString() ?? '';
+    _controllers['desa_siswa']?.text = widget.siswa['desa']?.toString() ?? '';
+    _controllers['kecamatan_siswa']?.text = widget.siswa['kecamatan']?.toString() ?? '';
+    _controllers['kabupaten_siswa']?.text = widget.siswa['kabupaten']?.toString() ?? '';
+    _controllers['provinsi_siswa']?.text = widget.siswa['provinsi']?.toString() ?? '';
+    _controllers['kode_pos_siswa']?.text = widget.siswa['kode_pos']?.toString() ?? '';
 
-    if (widget.siswa?['ttl'] != null) {
-      final ttl = widget.siswa!['ttl'].toString().split(', ');
-      if (ttl.length >= 2) {
-        _tempatController.text = ttl[0].trim();
-        try {
-          final dateStr = ttl[1].trim();
-          _tanggalLahir = DateTime.parse(dateStr);
-        } catch (e) {
-          debugPrint('Error parsing date: $e');
-        }
-      } else {
-        _tempatController.text = widget.siswa!['ttl'].toString().trim();
-      }
-    }
-
-    if (widget.siswa != null && widget.siswa!['orang_tua_id'] != null) {
-      await _fetchParentData(widget.siswa!['orang_tua_id']);
+    if (widget.siswa['orang_tua_id'] != null) {
+      await _fetchParentData(widget.siswa['orang_tua_id']);
     }
   }
 
@@ -159,13 +185,11 @@ class _SiswaFormPageState extends State<SiswaFormPage> {
 
       debugPrint('Fetched ${_dusunList.length} dusun records: $_dusunList');
 
-      if (widget.siswa != null) {
-        if (_selectedDusunSiswa != null && _selectedDusunSiswa!.isNotEmpty) {
-          await _fetchAddressDetails(_selectedDusunSiswa!, isSiswa: true);
-        }
-        if (_selectedDusunWali != null && _selectedDusunWali!.isNotEmpty) {
-          await _fetchAddressDetails(_selectedDusunWali!, isSiswa: false);
-        }
+      if (_selectedDusunSiswa != null && _selectedDusunSiswa!.isNotEmpty) {
+        await _fetchAddressDetails(_selectedDusunSiswa!, isSiswa: true);
+      }
+      if (_selectedDusunWali != null && _selectedDusunWali!.isNotEmpty) {
+        await _fetchAddressDetails(_selectedDusunWali!, isSiswa: false);
       }
     } catch (e) {
       debugPrint('Error fetching dusun list: $e');
@@ -182,7 +206,7 @@ class _SiswaFormPageState extends State<SiswaFormPage> {
               children: [
                 const Icon(Icons.warning, color: Colors.white),
                 const SizedBox(width: 8),
-                const Expanded(child: Text('Gagal memuat data. Periksa koneksi internet anda')),
+                const Expanded(child: Text('Gagal memuat daftar dusun. Gunakan input manual.')),
                 IconButton(
                   icon: const Icon(Icons.refresh, color: Colors.white),
                   onPressed: _fetchDusunList,
@@ -331,41 +355,9 @@ class _SiswaFormPageState extends State<SiswaFormPage> {
     }
   }
 
-  Future<void> _addSiswa(Map<String, dynamic> data) async {
-    try {
-      final orangTuaId = await _saveOrangTua(data);
-
-      final siswaData = {
-        'nisn': data['nisn'],
-        'nama': data['nama'],
-        'jenis_kelamin': data['jenis_kelamin'],
-        'agama': data['agama'],
-        'ttl': data['ttl'],
-        'no_hp': data['no_hp'],
-        'nik': data['nik'],
-        'jalan': data['jalan_siswa'],
-        'rt_rw': data['rt_rw_siswa'],
-        'dusun': data['dusun_siswa'],
-        'desa': data['desa_siswa'],
-        'kecamatan': data['kecamatan_siswa'],
-        'kabupaten': data['kabupaten_siswa'],
-        'provinsi': data['provinsi_siswa'],
-        'kode_pos': data['kode_pos_siswa'],
-        'alamat_id': data['alamat_id_siswa'],
-        'orang_tua_id': orangTuaId,
-      };
-
-      final response = await _supabase.from('siswa').insert(siswaData);
-      debugPrint('Siswa added successfully: $response');
-    } catch (e) {
-      debugPrint('Error adding siswa: $e');
-      rethrow;
-    }
-  }
-
   Future<void> _updateSiswa(String id, Map<String, dynamic> data) async {
     try {
-      final existingOrangTuaId = widget.siswa?['orang_tua_id'];
+      final existingOrangTuaId = widget.siswa['orang_tua_id'];
       final orangTuaId = await _saveOrangTua(data, existingId: existingOrangTuaId);
 
       final updateData = {
@@ -411,8 +403,10 @@ class _SiswaFormPageState extends State<SiswaFormPage> {
       final rtRwWaliValue = _controllers['rt_rw_wali']!.text.trim();
       final jalanSiswaValue = _controllers['jalan_siswa']!.text.trim();
       final jalanWaliValue = _controllers['jalan_wali']!.text.trim();
+      final tempatLahirValue = _tempatLahirController.text.trim();
+      final tanggalLahirValue = _tanggalLahirController.text.trim();
 
-      // Validasi tambahan
+      // Additional validations
       if (dusunSiswaValue.isEmpty || dusunWaliValue.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Dusun siswa dan wali wajib diisi')),
@@ -420,9 +414,26 @@ class _SiswaFormPageState extends State<SiswaFormPage> {
         return;
       }
 
-      if (_tanggalLahir == null || _tempatController.text.trim().isEmpty) {
+      if (tempatLahirValue.isEmpty || tanggalLahirValue.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Tempat dan tanggal lahir wajib diisi')),
+        );
+        return;
+      }
+
+      // Validate date format
+      if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(tanggalLahirValue)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Tanggal lahir harus dalam format YYYY-MM-DD')),
+        );
+        return;
+      }
+
+      try {
+        DateTime.parse(tanggalLahirValue);
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Tanggal lahir tidak valid: $e')),
         );
         return;
       }
@@ -526,33 +537,18 @@ class _SiswaFormPageState extends State<SiswaFormPage> {
         'alamat_id_wali': alamatIdWali,
         'jenis_kelamin': _jenisKelamin,
         'agama': _agama,
-        'ttl': "${_tempatController.text.trim()}, ${_tanggalLahir!.toIso8601String().split('T').first}",
+        'ttl': '$tempatLahirValue, $tanggalLahirValue',
       };
 
       try {
-        if (widget.siswa == null) {
-          await _addSiswa(data);
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Siswa berhasil ditambahkan'),
-                backgroundColor: Colors.green,
-              ),
-            );
-          }
-        } else {
-          await _updateSiswa(widget.siswa!['id'].toString(), data);
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Data siswa berhasil diperbarui'),
-                backgroundColor: Colors.green,
-              ),
-            );
-          }
-        }
-
+        await _updateSiswa(widget.siswa['id'].toString(), data);
         if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Data siswa berhasil diperbarui'),
+              backgroundColor: Colors.green,
+            ),
+          );
           Navigator.pop(context);
         }
       } catch (e) {
@@ -678,13 +674,13 @@ class _SiswaFormPageState extends State<SiswaFormPage> {
                     : key == 'rt_rw_siswa' || key == 'rt_rw_wali'
                         ? [
                             FilteringTextInputFormatter.allow(RegExp(r'[0-9/]')),
-                            LengthLimitingTextInputFormatter(7), // Maksimal 7 karakter (contoh: 123/123)
+                            LengthLimitingTextInputFormatter(7),
                           ]
                         : null,
         keyboardType: key == 'no_hp' || key == 'nik'
             ? TextInputType.number
             : key == 'rt_rw_siswa' || key == 'rt_rw_wali'
-                ? TextInputType.text // Mengizinkan tanda '/'
+                ? TextInputType.text
                 : TextInputType.text,
       ),
     );
@@ -875,12 +871,12 @@ class _SiswaFormPageState extends State<SiswaFormPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          widget.siswa == null ? "Tambah Data Siswa" : "Edit Siswa",
-          style: const TextStyle(
+        title: const Text(
+          "Edit Siswa",
+          style: TextStyle(
             fontWeight: FontWeight.bold,
             fontSize: 24,
-            color: Colors.white
+            color: Colors.white,
           ),
         ),
         centerTitle: true,
@@ -923,7 +919,7 @@ class _SiswaFormPageState extends State<SiswaFormPage> {
                         const SizedBox(width: 8),
                         const Expanded(
                           child: Text(
-                            "Informasi Pribadi",
+                            "Informasi Siswa",
                             style: TextStyle(
                               fontSize: 17,
                               fontWeight: FontWeight.bold,
@@ -998,7 +994,7 @@ class _SiswaFormPageState extends State<SiswaFormPage> {
                   Padding(
                     padding: const EdgeInsets.only(bottom: 16.0),
                     child: TextFormField(
-                      controller: _tempatController,
+                      controller: _tempatLahirController,
                       decoration: InputDecoration(
                         labelText: "Tempat Lahir *",
                         prefixIcon: const Icon(Icons.location_on),
@@ -1020,12 +1016,11 @@ class _SiswaFormPageState extends State<SiswaFormPage> {
                   Padding(
                     padding: const EdgeInsets.only(bottom: 16.0),
                     child: TextFormField(
+                      controller: _tanggalLahirController,
                       readOnly: true,
                       decoration: InputDecoration(
                         labelText: "Tanggal Lahir *",
-                        hintText: _tanggalLahir == null
-                            ? "Pilih tanggal"
-                            : "${_tanggalLahir!.day}/${_tanggalLahir!.month}/${_tanggalLahir!.year}",
+                        hintText: "Pilih tanggal (YYYY-MM-DD)",
                         prefixIcon: const Icon(Icons.calendar_today),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
@@ -1036,11 +1031,14 @@ class _SiswaFormPageState extends State<SiswaFormPage> {
                           horizontal: 16,
                           vertical: 12,
                         ),
+                        errorText: _dateError,
                       ),
                       onTap: () async {
                         final picked = await showDatePicker(
                           context: context,
-                          initialDate: _tanggalLahir ?? DateTime(2000),
+                          initialDate: _tanggalLahirController.text.isNotEmpty
+                              ? DateTime.tryParse(_tanggalLahirController.text) ?? DateTime(2000)
+                              : DateTime(2000),
                           firstDate: DateTime(1970),
                           lastDate: DateTime.now(),
                           builder: (context, child) {
@@ -1058,12 +1056,26 @@ class _SiswaFormPageState extends State<SiswaFormPage> {
                           },
                         );
                         if (picked != null && mounted) {
-                          setState(() => _tanggalLahir = picked);
+                          setState(() {
+                            _tanggalLahirController.text = picked.toIso8601String().split('T').first;
+                            _dateError = null; // Clear error on user selection
+                          });
                         }
                       },
-                      validator: (_) => _tanggalLahir == null
-                          ? "Tanggal lahir wajib dipilih"
-                          : null,
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return "Tanggal lahir wajib diisi";
+                        }
+                        if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value.trim())) {
+                          return "Tanggal lahir harus dalam format YYYY-MM-DD";
+                        }
+                        try {
+                          DateTime.parse(value.trim());
+                        } catch (e) {
+                          return "Tanggal lahir tidak valid";
+                        }
+                        return null;
+                      },
                     ),
                   ),
 
@@ -1141,9 +1153,9 @@ class _SiswaFormPageState extends State<SiswaFormPage> {
                       child: const Row(
                         children: [
                           Icon(Icons.info_outline, color: Colors.green, size: 20),
-                          SizedBox(width: 8),
+                          SizedBox(width: 5),
                           Text(
-                            "Alamat siswa diisi otomatis\nberdasarkan dusun",
+                            "Alamat siswa diisi otomatis,\nberdasarkan dusun",
                             style: TextStyle(
                               color: Colors.green,
                               fontWeight: FontWeight.w500,
@@ -1336,9 +1348,9 @@ class _SiswaFormPageState extends State<SiswaFormPage> {
                       child: const Row(
                         children: [
                           Icon(Icons.info_outline, color: Colors.orange, size: 20),
-                          SizedBox(width: 8),
+                          SizedBox(width: 5),
                           Text(
-                            "Alamat wali diisi otomatis\nberdasarkan dusun",
+                            "Alamat wali diisi otomatis,\nberdasarkan dusun",
                             style: TextStyle(
                               color: Colors.orange,
                               fontWeight: FontWeight.w500,
@@ -1461,11 +1473,7 @@ class _SiswaFormPageState extends State<SiswaFormPage> {
                             )
                           : const Icon(Icons.save),
                       label: Text(
-                        _isSaving
-                            ? "Menyimpan..."
-                            : widget.siswa == null
-                                ? "Tambah Siswa Baru"
-                                : "Update Data Siswa",
+                        _isSaving ? "Menyimpan..." : "Update Data Siswa",
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -1488,7 +1496,8 @@ class _SiswaFormPageState extends State<SiswaFormPage> {
     for (var controller in _controllers.values) {
       controller.dispose();
     }
-    _tempatController.dispose();
+    _tempatLahirController.dispose();
+    _tanggalLahirController.dispose();
     _dusunSiswaController.dispose();
     _dusunWaliController.dispose();
     super.dispose();

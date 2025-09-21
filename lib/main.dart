@@ -22,7 +22,7 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'Data Siswa',
       theme: ThemeData(primarySwatch: Colors.blue),
-      home: const SiswaListPage(),
+      home: const HomePage(),
     );
   }
 }
